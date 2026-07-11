@@ -1,0 +1,26 @@
+import { describe, expect, it } from 'vitest'
+import { dimensionScores, estimateIqRange, matrixMetrics, rankKeys } from './scoring'
+
+const q = (id: string, dimension: string, reverse = false) => ({ id, text: id, type: 'likert' as const, dimension, reverse, weights: { [dimension]: 1 }, options: [] })
+describe('MindScope scoring', () => {
+  it('calculates four dimensions and reverse scoring', () => { const qs = [q('e', 'E'), q('i', 'I', true)]; const scores = dimensionScores({ e: '5', i: '1' }, qs, ['E', 'I']); expect(scores[0].value).toBe(100); expect(scores[1].value).toBe(100) })
+  it('converts big five average to percentage', () => { const scores = dimensionScores({ a: '3' }, [q('a', 'O')], ['O']); expect(scores[0].value).toBe(50) })
+  it('ranks enneagram and disc dimensions', () => { expect(rankKeys({ '1': 66, '2': 82, '3': 40 })).toEqual(['2', '1', '3']) })
+  it('returns a transparent IQ range', () => { const range = estimateIqRange(80, 24); expect(range.iq).toBe(130); expect(range.low).toBe(121); expect(range.high).toBe(139) })
+  it('uses weighted accuracy for matrix questions', () => { const qs = [1, 2, 3].map((d, i) => ({ id: String(i), text: '', type: 'matrix' as const, options: [], correctOptionId: 'yes', difficulty: d as 1 | 2 | 3 })); const m = matrixMetrics({ '0': 'yes', '1': 'no', '2': 'yes' }, qs); expect(m.accuracy).toBe(4 / 6); expect(m.index).toBeGreaterThan(0) })
+  it('clamps percentage values to the 0–100 range', () => { expect(dimensionScores({ a: '9' }, [q('a', 'O')], ['O'])[0].value).toBe(100) })
+  it('handles missing answers without crashing', () => { expect(dimensionScores({}, [q('a', 'O')], ['O'])[0].value).toBe(50) })
+  it('returns a stable ranking for equal values', () => { expect(rankKeys({ A: 50, B: 50 })).toEqual(['A', 'B']) })
+  it('uses a wider error interval for short matrix versions', () => { expect(estimateIqRange(50, 12).high - estimateIqRange(50, 12).low).toBe(24) })
+  it('uses a narrower error interval for long matrix versions', () => { expect(estimateIqRange(50, 48).high - estimateIqRange(50, 48).low).toBe(12) })
+  it('does not divide by zero when no high-difficulty items exist', () => { const m = matrixMetrics({}, [{ id: 'a', text: '', type: 'matrix', options: [], correctOptionId: 'x', difficulty: 1 }]); expect(Number.isFinite(m.highPerf)).toBe(true) })
+  it('gives full weighted accuracy for all correct answers', () => { const qs = [1, 2, 3].map((d, i) => ({ id: String(i), text: '', type: 'matrix' as const, options: [], correctOptionId: 'x', difficulty: d as 1 | 2 | 3 })); expect(matrixMetrics({ '0': 'x', '1': 'x', '2': 'x' }, qs).accuracy).toBe(1) })
+  it('returns zero weighted accuracy for all incorrect answers', () => { const qs = [{ id: 'a', text: '', type: 'matrix' as const, options: [], correctOptionId: 'x', difficulty: 3 as const }]; expect(matrixMetrics({ a: 'y' }, qs).accuracy).toBe(0) })
+  it('calculates the midpoint IQ transparently', () => { expect(estimateIqRange(0, 24).iq).toBe(70); expect(estimateIqRange(100, 24).iq).toBe(145) })
+  it('keeps IQ inside the documented lower bound', () => { expect(estimateIqRange(-20, 24).low).toBe(70) })
+  it('keeps IQ inside the documented upper bound', () => { expect(estimateIqRange(120, 24).high).toBe(145) })
+  it('supports reverse scoring on a five-point answer', () => { expect(dimensionScores({ a: '5' }, [q('a', 'O', true)], ['O'])[0].value).toBe(0) })
+  it('supports weighted dimensions independently', () => { const a = dimensionScores({ a: '5', b: '1' }, [{ ...q('a', 'O'), weights: { O: 1 } }, { ...q('b', 'C'), weights: { C: 1 } }], ['O', 'C']); expect(a.map(x => x.value)).toEqual([100, 0]) })
+  it('keeps a missing high-difficulty section usable', () => { const qs = [{ id: 'a', text: '', type: 'matrix' as const, options: [], correctOptionId: 'x', difficulty: 2 as const }]; expect(matrixMetrics({ a: 'x' }, qs).highPerf).toBe(1) })
+  it('makes a partial matrix result conservative', () => { const qs = [{ id: 'a', text: '', type: 'matrix' as const, options: [], correctOptionId: 'x', difficulty: 1 as const }]; expect(matrixMetrics({}, qs).index).toBe(0) })
+})
